@@ -9,271 +9,674 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var vm = GeneratorViewModel()
-    @State private var step: Int = 0
-    @State private var selectedPresetCategory: PresetCategory = .square
-    @State private var selectedPreset: PresetOption = .square1024
-    @State private var customWidth: Int = 1024
-    @State private var customHeight: Int = 1024
-    @State private var useMidColor: Bool = false
-
+    @State private var selectedTab: Int = 0
+    @State private var showingShareSheet = false
+    @State private var showingSizeSheet = false
+    @State private var showingExportOptions = false
+    @State private var showingCustomGradient = false
+    
     var body: some View {
-        NavigationView {
-            VStack(spacing: 12) {
-                StepHeader(step: step)
-                Group {
-                    switch step {
-                    case 0: sizeStep
-                    case 1: paletteStep
-                    case 2: previewStep
-                    default: advancedStep
+        NavigationStack {
+            ZStack {
+                // Background gradient
+                LinearGradient(
+                    colors: [Color(uiColor: .systemBackground), Color(uiColor: .secondarySystemBackground)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Main preview card
+                        previewCard
+                        
+                        // Quick action buttons
+                        quickActionsRow
+                        
+                        // Tabbed content
+                        tabbedContent
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Perlin Noise")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Button(action: { showingSizeSheet = true }) {
+                            Label("Canvas Size", systemImage: "square.resize")
+                        }
+                        Button(action: { vm.randomizeSeed() }) {
+                            Label("Random Seed", systemImage: "shuffle")
+                        }
+                        Divider()
+                        Button(action: { showingExportOptions = true }) {
+                            Label("Export Options", systemImage: "square.and.arrow.up")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.title3)
                     }
                 }
-                stepperBar
             }
-            .padding()
-            .navigationTitle("Perlin Noise")
-            .onAppear { vm.regenerateImmediately() }
+            .sheet(isPresented: $showingSizeSheet) {
+                SizePickerSheet(vm: vm)
+            }
+            .sheet(isPresented: $showingExportOptions) {
+                ExportOptionsSheet(vm: vm)
+            }
+            .sheet(isPresented: $showingCustomGradient) {
+                CustomGradientEditor(vm: vm)
+            }
+            .onAppear {
+                vm.regenerateImmediately()
+            }
         }
     }
-}
-
-private extension ContentView {
-    var preview: some View {
-        ZStack {
-            if let cg = vm.image {
-                let img = Image(uiImage: UIImage(cgImage: cg))
-                img
+    
+    // MARK: - Main Preview Card
+    
+    private var previewCard: some View {
+        VStack(spacing: 0) {
+            if let cgImage = vm.image {
+                Image(uiImage: UIImage(cgImage: cgImage))
                     .resizable()
                     .scaledToFit()
-                    .cornerRadius(8)
-                    .overlay { RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.3)) }
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: .black.opacity(0.1), radius: 20, y: 10)
             } else {
-                Rectangle()
-                    .fill(.secondary.opacity(0.1))
-                    .overlay { Text(vm.isGenerating ? "Generating…" : "No Image").foregroundStyle(.secondary) }
-                    .cornerRadius(8)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color(uiColor: .secondarySystemBackground))
+                        .frame(height: 350)
+                    
+                    VStack(spacing: 16) {
+                        if vm.isGenerating {
+                            VStack(spacing: 12) {
+                                ProgressView(value: vm.generationProgress)
+                                    .progressViewStyle(.linear)
+                                    .tint(.accentColor)
+                                    .frame(width: 120)
+                                
+                                Text("Generating...")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Image(systemName: "photo.on.rectangle.angled")
+                                .font(.system(size: 50))
+                                .foregroundStyle(.tertiary)
+                            Text("No Image")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .shadow(color: .black.opacity(0.05), radius: 20, y: 10)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: 320)
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: vm.image != nil)
     }
-
-    // Step 0: Size
-    var sizeStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Choose size").font(.headline)
-            Picker("Category", selection: $selectedPresetCategory) {
-                ForEach(PresetCategory.allCases) { c in Text(c.title).tag(c) }
+    
+    // MARK: - Quick Actions
+    
+    private var quickActionsRow: some View {
+        HStack(spacing: 12) {
+            // Regenerate button
+            Button(action: {
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
+                vm.regenerateImmediately()
+            }) {
+                Label("Generate", systemImage: "arrow.clockwise")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.accentColor.gradient)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .disabled(vm.isGenerating)
+            
+            // Share button
+            if let cgImage = vm.image {
+                ShareLink(item: ImageShareItem(image: UIImage(cgImage: cgImage)), 
+                         preview: SharePreview("Perlin Noise", image: Image(uiImage: UIImage(cgImage: cgImage)))) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.headline)
+                        .frame(width: 50, height: 50)
+                        .background(Color(uiColor: .secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+            } else {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.headline)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 50, height: 50)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+    }
+    
+    // MARK: - Tabbed Content
+    
+    private var tabbedContent: some View {
+        VStack(spacing: 16) {
+            // Custom tab selector
+            Picker("", selection: $selectedTab.animation(.spring(response: 0.3))) {
+                Text("Colors").tag(0)
+                Text("Advanced").tag(1)
+                Text("Info").tag(2)
             }
             .pickerStyle(.segmented)
-            Picker("Preset", selection: $selectedPreset) {
-                ForEach(selectedPresetCategory.options) { o in Text(o.title).tag(o) }
-            }
-            .onChange(of: selectedPreset) { _ in
-                var s = vm.settings
-                s.width = selectedPreset.size.width
-                s.height = selectedPreset.size.height
-                vm.settings = s
-            }
-
-            Divider()
-            Text("Or custom").font(.subheadline)
-            HStack {
-                Stepper("Width: \(customWidth)", value: $customWidth, in: 8...4096, step: 8)
-                Stepper("Height: \(customHeight)", value: $customHeight, in: 8...4096, step: 8)
-            }
-            Button("Apply Custom") {
-                var s = vm.settings
-                s.width = customWidth
-                s.height = customHeight
-                vm.settings = s
-            }
-        Text("Size preview")
-        sizePreview(width: vm.settings.width, height: vm.settings.height)
-            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: 160)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.2)))
-            .cornerRadius(8)
-        }
-    }
-
-    // Step 3: Advanced
-    var advancedStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Advanced").font(.headline)
-            HStack {
-                Text("Seed: \(vm.settings.seed)").font(.caption).lineLimit(1).truncationMode(.middle)
-                Spacer()
-                Button("Randomize") { vm.randomizeSeed() }
-            }
-            VStack(alignment: .leading) {
-                HStack { Text("Scale"); Spacer(); Text(String(format: "%.4f", vm.settings.scale)).monospacedDigit() }
-                Slider(value: Binding(
-                    get: { vm.settings.scale },
-                    set: { vm.settings.scale = $0; vm.regenerateDebounced() }
-                ), in: 0.0005...0.02)
-            }
-            VStack(alignment: .leading) {
-                HStack { Text("Octaves"); Spacer(); Text("\(vm.settings.octaves)") }
-                Slider(value: Binding(
-                    get: { Double(vm.settings.octaves) },
-                    set: { vm.settings.octaves = Int($0.rounded()); vm.regenerateDebounced() }
-                ), in: 1...8, step: 1)
-            }
-            VStack(alignment: .leading) {
-                HStack { Text("Persistence"); Spacer(); Text(String(format: "%.2f", vm.settings.persistence)).monospacedDigit() }
-                Slider(value: Binding(
-                    get: { vm.settings.persistence },
-                    set: { vm.settings.persistence = $0; vm.regenerateDebounced() }
-                ), in: 0.1...1.0)
-            }
-            VStack(alignment: .leading) {
-                HStack { Text("Lacunarity"); Spacer(); Text(String(format: "%.2f", vm.settings.lacunarity)).monospacedDigit() }
-                Slider(value: Binding(
-                    get: { vm.settings.lacunarity },
-                    set: { vm.settings.lacunarity = $0; vm.regenerateDebounced() }
-                ), in: 1.0...4.0)
-            }
-            if vm.settings.colorVariant == .custom {
-                Divider()
-                Text("Custom gradient")
-                Toggle("Use mid color", isOn: $useMidColor)
-                ColorPicker("Start", selection: Binding(get: { Color(uiColor: .black) }, set: { c in
-                    let rgb = c.rgb255()
-                    var stops = vm.customStops
-                    if stops.isEmpty { stops = [(0.0,(rgb.r,rgb.g,rgb.b)), (1.0,(255,255,255))] }
-                    else { stops[0] = (0.0,(rgb.r,rgb.g,rgb.b)) }
-                    vm.customStops = stops
-                    vm.regenerateDebounced()
-                }))
-                if useMidColor {
-                    ColorPicker("Middle", selection: Binding(get: { Color(uiColor: .gray) }, set: { c in
-                        let rgb = c.rgb255()
-                        var stops = vm.customStops
-                        if stops.count < 3 { stops.insert((0.5,(rgb.r,rgb.g,rgb.b)), at: min(1, stops.count)) }
-                        else { stops[1] = (0.5,(rgb.r,rgb.g,rgb.b)) }
-                        vm.customStops = stops
-                        vm.regenerateDebounced()
-                    }))
-                }
-                ColorPicker("End", selection: Binding(get: { Color(uiColor: .white) }, set: { c in
-                    let rgb = c.rgb255()
-                    var stops = vm.customStops
-                    if stops.isEmpty { stops = [(0.0,(0,0,0)), (1.0,(rgb.r,rgb.g,rgb.b))] }
-                    else if let last = stops.indices.last { stops[last] = (1.0,(rgb.r,rgb.g,rgb.b)) }
-                    vm.customStops = stops
-                    vm.regenerateDebounced()
-                }))
-            }
-        }
-    }
-
-    // Step 1: Palette (basic)
-    var paletteStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Color palette").font(.headline)
-            Picker("Variant", selection: $vm.settings.colorVariant) {
-                ForEach(GeneratorSettings.ColorVariant.allCases) { v in
-                    HStack {
-                        palettePreview(for: v)
-                            .frame(height: 12)
-                            .cornerRadius(3)
-                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(.secondary.opacity(0.2)))
-                        Text(v.displayName)
-                    }
-                    .tag(v)
+            
+            // Tab content
+            Group {
+                switch selectedTab {
+                case 0:
+                    colorPalettesView
+                        .transition(.opacity.combined(with: .move(edge: .leading)))
+                case 1:
+                    advancedParametersView
+                        .transition(.opacity)
+                case 2:
+                    infoView
+                        .transition(.opacity.combined(with: .move(edge: .trailing)))
+                default:
+                    EmptyView()
                 }
             }
-            .onChange(of: vm.settings.colorVariant) { _ in vm.regenerateDebounced() }
-
-            if vm.settings.colorVariant == .custom {
-                Button("Customize Gradient…") { step = 3 }
-                    .buttonStyle(.bordered)
-            }
-
-            Divider()
-            Text("Preview")
-            preview
-
-            HStack {
-                Spacer()
-                Button("Regenerate") { vm.regenerateImmediately() }
-                    .disabled(vm.isGenerating)
-            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: selectedTab)
         }
     }
-
-    // Step 3: Preview/Export
-    var previewStep: some View {
+    
+    // MARK: - Color Palettes View
+    
+    private var colorPalettesView: some View {
         VStack(spacing: 12) {
-            preview
-            actions
-        }
-    }
-
-    var stepperBar: some View {
-        HStack {
-            Button("Back") { if step > 0 { step -= 1 } }
-                .disabled(step == 0)
-            Spacer()
-            Button(step < 3 ? "Next" : "Done") {
-                if step < 3 { step += 1 } else { step = 3 }
+            ForEach(GeneratorSettings.ColorVariant.allCases) { variant in
+                PaletteCard(
+                    variant: variant,
+                    isSelected: vm.settings.colorVariant == variant,
+                    action: {
+                        let generator = UISelectionFeedbackGenerator()
+                        generator.selectionChanged()
+                        
+                        if variant == .custom {
+                            showingCustomGradient = true
+                        } else {
+                            vm.settings.colorVariant = variant
+                            vm.regenerateDebounced()
+                        }
+                    }
+                )
             }
         }
     }
-
-    var actions: some View {
-        HStack {
-            Button(role: .none) {
-                vm.regenerateImmediately()
-            } label: {
-                Label("Regenerate", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(vm.isGenerating)
-
-            Spacer()
-
-            if let cg = vm.image {
-                let ui = UIImage(cgImage: cg)
-                ShareLink(item: ImageShareItem(image: ui), preview: SharePreview("Perlin Noise", image: Image(uiImage: ui))) {
-                    Label("Share", systemImage: "square.and.arrow.up")
+    
+    // MARK: - Advanced Parameters View
+    
+    private var advancedParametersView: some View {
+        VStack(spacing: 16) {
+            // Seed card
+            CardView {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("Seed", systemImage: "number")
+                            .font(.headline)
+                        Spacer()
+                        Button("Shuffle") {
+                            let generator = UIImpactFeedbackGenerator(style: .light)
+                            generator.impactOccurred()
+                            vm.randomizeSeed()
+                        }
+                        .font(.subheadline)
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                    }
+                    Text("\(vm.settings.seed)")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-            } else {
-                Label("Share", systemImage: "square.and.arrow.up")
-                    .foregroundStyle(.secondary)
+            }
+            
+            // Scale
+            ParameterSlider(
+                icon: "ruler",
+                title: "Scale",
+                value: $vm.settings.scale,
+                range: 0.0005...0.02,
+                format: "%.4f",
+                onChange: { vm.regenerateDebounced() }
+            )
+            
+            // Octaves
+            ParameterSlider(
+                icon: "waveform.path",
+                title: "Octaves",
+                value: Binding(
+                    get: { Double(vm.settings.octaves) },
+                    set: { vm.settings.octaves = Int($0.rounded()) }
+                ),
+                range: 1...8,
+                step: 1,
+                format: "%.0f",
+                onChange: { vm.regenerateDebounced() }
+            )
+            
+            // Persistence
+            ParameterSlider(
+                icon: "chart.line.uptrend.xyaxis",
+                title: "Persistence",
+                value: $vm.settings.persistence,
+                range: 0.1...1.0,
+                format: "%.2f",
+                onChange: { vm.regenerateDebounced() }
+            )
+            
+            // Lacunarity
+            ParameterSlider(
+                icon: "triangle",
+                title: "Lacunarity",
+                value: $vm.settings.lacunarity,
+                range: 1.0...4.0,
+                format: "%.2f",
+                onChange: { vm.regenerateDebounced() }
+            )
+        }
+    }
+    
+    // MARK: - Info View
+    
+    private var infoView: some View {
+        VStack(spacing: 16) {
+            CardView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Canvas Size", systemImage: "square.resize")
+                        .font(.headline)
+                    
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Width")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(vm.settings.width) px")
+                                .font(.system(.title3, design: .rounded))
+                                .fontWeight(.semibold)
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "xmark")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        
+                        Spacer()
+                        
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("Height")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("\(vm.settings.height) px")
+                                .font(.system(.title3, design: .rounded))
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    
+                    Button(action: { showingSizeSheet = true }) {
+                        Text("Change Size")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(Color.accentColor.opacity(0.1))
+                            .foregroundStyle(Color.accentColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            }
+            
+            CardView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("About Perlin Noise", systemImage: "info.circle")
+                        .font(.headline)
+                    
+                    Text("Perlin noise is a type of gradient noise used in computer graphics to create natural-looking textures and patterns. It's commonly used for terrain generation, cloud effects, and procedural textures.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
 }
 
-// Transferable wrapper for ShareLink
-import UniformTypeIdentifiers
-import SwiftUI
-import UIKit
+// MARK: - Supporting Views
 
-struct ImageShareItem: Transferable {
-    let image: UIImage
-    static var transferRepresentation: some TransferRepresentation {
-        DataRepresentation(exportedContentType: .png) { item in
-            item.image.pngData() ?? Data()
-        }
-    }
-}
-#Preview { ContentView() }
-/// Step header
-struct StepHeader: View {
-    let step: Int
+struct PaletteCard: View {
+    let variant: GeneratorSettings.ColorVariant
+    let isSelected: Bool
+    let action: () -> Void
+    
     var body: some View {
-        HStack {
-            ForEach(0..<4, id: \.self) { idx in
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(idx <= step ? Color.accentColor : Color.secondary.opacity(0.2))
-                    .frame(height: 4)
+        Button(action: action) {
+            HStack(spacing: 16) {
+                // Palette preview
+                let lut = ColorMaps.lut(for: variant)
+                let colors = stride(from: 0, through: 255, by: 20).map { i -> Color in
+                    let idx = i * 4
+                    let r = Double(lut[idx + 0]) / 255.0
+                    let g = Double(lut[idx + 1]) / 255.0
+                    let b = Double(lut[idx + 2]) / 255.0
+                    return Color(red: r, green: g, blue: b)
+                }
+                
+                HStack(spacing: 0) {
+                    ForEach(Array(colors.enumerated()), id: \.offset) { _, color in
+                        color
+                    }
+                }
+                .frame(width: 100, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                )
+                
+                Text(variant.displayName)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                
+                Spacer()
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.accent)
+                }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ParameterSlider: View {
+    let icon: String
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    var step: Double? = nil
+    let format: String
+    let onChange: () -> Void
+    
+    var body: some View {
+        CardView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label(title, systemImage: icon)
+                        .font(.headline)
+                    Spacer()
+                    Text(String(format: format, value))
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                
+                Slider(
+                    value: Binding(
+                        get: { value },
+                        set: { newValue in
+                            value = newValue
+                            onChange()
+                        }
+                    ),
+                    in: range,
+                    step: step ?? 0.0001
+                )
+                .tint(.accentColor)
             }
         }
     }
 }
 
-// Preset definitions
+struct CardView<Content: View>: View {
+    let content: Content
+    
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+    
+    var body: some View {
+        content
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemBackground))
+            )
+    }
+}
+
+// MARK: - Size Picker Sheet
+
+struct SizePickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var vm: GeneratorViewModel
+    @State private var selectedCategory: PresetCategory = .square
+    @State private var selectedPreset: PresetOption = .square1024
+    @State private var customWidth: String = "1024"
+    @State private var customHeight: String = "1024"
+    @State private var useCustom: Bool = false
+    
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Category", selection: $selectedCategory) {
+                        ForEach(PresetCategory.allCases) { category in
+                            Text(category.title).tag(category)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    
+                    Picker("Preset", selection: $selectedPreset) {
+                        ForEach(selectedCategory.options) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .disabled(useCustom)
+                } header: {
+                    Text("Presets")
+                }
+                
+                Section {
+                    Toggle("Use Custom Size", isOn: $useCustom)
+                    
+                    if useCustom {
+                        HStack {
+                            Text("Width")
+                            Spacer()
+                            TextField("1024", text: $customWidth)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 100)
+                        }
+                        
+                        HStack {
+                            Text("Height")
+                            Spacer()
+                            TextField("1024", text: $customHeight)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 100)
+                        }
+                    }
+                } header: {
+                    Text("Custom Size")
+                } footer: {
+                    Text("Valid range: 8 to 4096 pixels. Very large sizes may take longer to generate.")
+                }
+            }
+            .navigationTitle("Canvas Size")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        applySize()
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    private func applySize() {
+        var settings = vm.settings
+        
+        if useCustom {
+            if let width = Int(customWidth), let height = Int(customHeight) {
+                settings.width = max(8, min(width, 4096))
+                settings.height = max(8, min(height, 4096))
+            }
+        } else {
+            settings.width = selectedPreset.size.width
+            settings.height = selectedPreset.size.height
+        }
+        
+        vm.settings = settings
+        vm.regenerateImmediately()
+    }
+}
+
+// MARK: - Export Options Sheet
+
+struct ExportOptionsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var vm: GeneratorViewModel
+    @State private var showingSaveSuccess = false
+    @State private var saveErrorMessage: String?
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                if let cgImage = vm.image {
+                    let uiImage = UIImage(cgImage: cgImage)
+                    
+                    Section {
+                        ShareLink(
+                            item: ImageShareItem(image: uiImage),
+                            preview: SharePreview("Perlin Noise", image: Image(uiImage: uiImage))
+                        ) {
+                            Label("Share Image", systemImage: "square.and.arrow.up")
+                        }
+                    }
+                    
+                    Section {
+                        Button(action: {
+                            saveToPhotos(uiImage)
+                        }) {
+                            Label("Save to Photos", systemImage: "photo.on.rectangle.angled")
+                        }
+                    }
+                    
+                    Section {
+                        HStack {
+                            Text("Size")
+                            Spacer()
+                            Text("\(vm.settings.width) × \(vm.settings.height)")
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        HStack {
+                            Text("Color Palette")
+                            Spacer()
+                            Text(vm.settings.colorVariant.displayName)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        HStack {
+                            Text("Seed")
+                            Spacer()
+                            Text("\(vm.settings.seed)")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } header: {
+                        Text("Image Info")
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Image",
+                        systemImage: "photo.on.rectangle.angled",
+                        description: Text("Generate an image first to export it")
+                    )
+                }
+            }
+            .navigationTitle("Export")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .alert("Saved!", isPresented: $showingSaveSuccess) {
+                Button("OK") { dismiss() }
+            } message: {
+                Text("Image saved to Photos successfully")
+            }
+            .alert("Error", isPresented: .constant(saveErrorMessage != nil)) {
+                Button("OK") { saveErrorMessage = nil }
+            } message: {
+                if let message = saveErrorMessage {
+                    Text(message)
+                }
+            }
+        }
+    }
+    
+    private func saveToPhotos(_ image: UIImage) {
+        // Create a custom completion handler class
+        class SaveHandler: NSObject {
+            var onComplete: ((Error?) -> Void)?
+            
+            @objc func image(_ image: UIImage, didFinishSavingWithError error: Error?, contextInfo: UnsafeRawPointer) {
+                onComplete?(error)
+            }
+        }
+        
+        let handler = SaveHandler()
+        handler.onComplete = { error in
+            if let error = error {
+                saveErrorMessage = error.localizedDescription
+            } else {
+                let generator = UINotificationFeedbackGenerator()
+                generator.notificationOccurred(.success)
+                showingSaveSuccess = true
+            }
+        }
+        
+        UIImageWriteToSavedPhotosAlbum(image, handler, #selector(SaveHandler.image(_:didFinishSavingWithError:contextInfo:)), nil)
+    }
+}
+
+// MARK: - Preset Definitions
+
 enum PresetCategory: String, CaseIterable, Identifiable {
     case square, wallpaper, photo
     var id: String { rawValue }
@@ -287,7 +690,7 @@ enum PresetCategory: String, CaseIterable, Identifiable {
     var options: [PresetOption] {
         switch self {
         case .square: return [.square512, .square1024, .square2048]
-        case .wallpaper: return [.iphone13, .iphone15pro, .ipadPro12, .uhdPortrait]
+        case .wallpaper: return [.iphone13, .iphone15pro, .ipadPro12]
         case .photo: return [.hd1080, .uhd4k]
         }
     }
@@ -295,18 +698,18 @@ enum PresetCategory: String, CaseIterable, Identifiable {
 
 enum PresetOption: String, CaseIterable, Identifiable {
     case square512, square1024, square2048
-    case iphone13, iphone15pro, ipadPro12, uhdPortrait
+    case iphone13, iphone15pro, ipadPro12
     case hd1080, uhd4k
+    
     var id: String { rawValue }
     var title: String {
         switch self {
         case .square512: return "512 × 512"
         case .square1024: return "1024 × 1024"
         case .square2048: return "2048 × 2048"
-        case .iphone13: return "iPhone 13/14 (1170×2532)"
-        case .iphone15pro: return "iPhone 15 Pro (1290×2796)"
-        case .ipadPro12: return "iPad Pro 12.9 (2048×2732)"
-        case .uhdPortrait: return "UHD Portrait (2160×3840)"
+        case .iphone13: return "iPhone 13/14"
+        case .iphone15pro: return "iPhone 15 Pro"
+        case .ipadPro12: return "iPad Pro 12.9\""
         case .hd1080: return "1920 × 1080"
         case .uhd4k: return "3840 × 2160"
         }
@@ -319,67 +722,25 @@ enum PresetOption: String, CaseIterable, Identifiable {
         case .iphone13: return (1170, 2532)
         case .iphone15pro: return (1290, 2796)
         case .ipadPro12: return (2048, 2732)
-        case .uhdPortrait: return (2160, 3840)
         case .hd1080: return (1920, 1080)
         case .uhd4k: return (3840, 2160)
         }
     }
 }
 
-private extension Color {
-    func rgb255() -> (r: Int, g: Int, b: Int) {
-        #if canImport(UIKit)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        if let cg = self.cgColor {
-            UIColor(cgColor: cg).getRed(&r, green: &g, blue: &b, alpha: &a)
+// MARK: - Image Share Item
+
+import UniformTypeIdentifiers
+
+struct ImageShareItem: Transferable {
+    let image: UIImage
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .png) { item in
+            item.image.pngData() ?? Data()
         }
-        return (Int(r * 255.0), Int(g * 255.0), Int(b * 255.0))
-        #else
-        return (0,0,0)
-        #endif
     }
 }
 
-// Helpers
-private extension ContentView {
-    func palettePreview(for variant: GeneratorSettings.ColorVariant) -> some View {
-        let lut = ColorMaps.lut(for: variant)
-        // sample 12 colors from LUT to build a gradient-like bar
-        let samples = stride(from: 0, through: 255, by: 23).map { i -> Color in
-            let idx = i * 4
-            let r = Double(lut[idx + 0]) / 255.0
-            let g = Double(lut[idx + 1]) / 255.0
-            let b = Double(lut[idx + 2]) / 255.0
-            return Color(red: r, green: g, blue: b)
-        }
-        return HStack(spacing: 0) {
-            ForEach(Array(samples.enumerated()), id: \.offset) { _, c in
-                c
-            }
-        }
-    }
-
-    func sizePreview(width: Int, height: Int) -> some View {
-        GeometryReader { geo in
-            let container = geo.size
-            let maxW = container.width - 16
-            let maxH = container.height - 16
-            let aspect = CGFloat(width) / CGFloat(height)
-            let w = min(maxW, maxH * aspect)
-            let h = w / aspect
-            ZStack {
-                Color.secondary.opacity(0.06)
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.15))
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.accentColor.opacity(0.08))
-                    .frame(width: w, height: h)
-                    .overlay {
-                        Text("\\(width) × \\(height)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-            }
-        }
-    }
+#Preview {
+    ContentView()
 }

@@ -3,12 +3,30 @@ import SwiftUI
 
 @MainActor
 final class GeneratorViewModel: ObservableObject {
-    @Published var settings: GeneratorSettings
+    @Published var settings: GeneratorSettings {
+        didSet {
+            if oldValue != settings {
+                // Auto-regenerate on settings change (except for immediate changes)
+                if oldValue.colorVariant != settings.colorVariant ||
+                   oldValue.width != settings.width ||
+                   oldValue.height != settings.height {
+                    // Immediate regeneration for major changes
+                }
+            }
+        }
+    }
     @Published private(set) var image: CGImage?
     @Published private(set) var isGenerating: Bool = false
+    @Published private(set) var generationProgress: Double = 0.0
     @Published var customStops: [(Double, (Int, Int, Int))] = [
         (0.0, (0, 0, 0)), (1.0, (255, 255, 255))
-    ]
+    ] {
+        didSet {
+            if settings.colorVariant == .custom {
+                regenerateDebounced()
+            }
+        }
+    }
 
     private var generationTask: Task<Void, Never>? = nil
     private var generationCounter: UInt64 = 0
@@ -19,10 +37,10 @@ final class GeneratorViewModel: ObservableObject {
 
     func randomizeSeed() {
         settings.seed = UInt64.random(in: 0...UInt64.max)
-        regenerateDebounced()
+        regenerateImmediately()
     }
 
-    func regenerateDebounced(delay: Duration = .milliseconds(250)) {
+    func regenerateDebounced(delay: Duration = .milliseconds(300)) {
         generationTask?.cancel()
         let currentId = nextGenerationId()
         generationTask = Task { [weak self] in
@@ -47,12 +65,24 @@ final class GeneratorViewModel: ObservableObject {
 
     private func generateImage(generationId: UInt64) async {
         isGenerating = true
+        generationProgress = 0.0
         let s = settings.validated()
 
         let (w, h, scale, octaves, persistence, lacunarity, seed, variant) =
             (s.width, s.height, s.scale, s.octaves, s.persistence, s.lacunarity, s.seed, s.colorVariant)
 
         let customStopsCopy = self.customStops
+        
+        // Simulate progress for better UX
+        let progressTask = Task { [weak self] in
+            for i in 1...8 {
+                try? await Task.sleep(for: .milliseconds(100))
+                await MainActor.run {
+                    self?.generationProgress = Double(i) / 10.0
+                }
+            }
+        }
+        
         let imageResult = await withTaskGroup(of: CGImage?.self) { group -> CGImage? in
             group.addTask {
                 let generator = PerlinNoiseGenerator(seed: seed)
@@ -75,9 +105,21 @@ final class GeneratorViewModel: ObservableObject {
             return await group.next() ?? nil
         }
 
+        progressTask.cancel()
+        
         guard generationId == generationCounter else { return }
+        self.generationProgress = 1.0
         self.image = imageResult
+        
+        // Small delay before resetting generating state for better UX
+        try? await Task.sleep(for: .milliseconds(150))
         self.isGenerating = false
+    }
+    
+    // Helper for getting UIImage
+    var uiImage: UIImage? {
+        guard let cgImage = image else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 
